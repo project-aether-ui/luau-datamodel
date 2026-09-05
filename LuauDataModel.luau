@@ -63,7 +63,125 @@
 	    property is an event.
 ]]
 
-local VideCore = require("../aether/src/host/VideCore")
+local VideCore: any = (function()
+	local ok, mod = pcall(function()
+		return (require :: any)("../aether/src/host/VideCore")
+	end)
+	if ok then
+		return mod
+	end
+	return nil
+end)()
+
+local function buildFallbackCore()
+	local activeListener: (() -> ())? = nil
+	local currentScope: { () -> () }? = nil
+
+	local function source(init: any): any
+		local val = init
+		local listeners: { () -> () } = {}
+		return function(...: any): any
+			local n = select("#", ...)
+			if n > 0 then
+				val = ...
+				local toRun = table.clone(listeners)
+				for _, l in ipairs(toRun) do
+					l()
+				end
+			end
+			if activeListener and not table.find(listeners, activeListener) then
+				table.insert(listeners, activeListener)
+			end
+			return val
+		end
+	end
+
+	local function root(fn: (destructor: () -> ()) -> ()): () -> ()
+		local cleanups: { () -> () } = {}
+		local prevScope = currentScope
+		currentScope = cleanups
+		local function destroy()
+			for _, c in ipairs(cleanups) do
+				c()
+			end
+			table.clear(cleanups)
+		end
+		fn(destroy)
+		currentScope = prevScope
+		return destroy
+	end
+
+	local function effect(fn: () -> ()): () -> ()
+		local cleanupFn: (() -> ())? = nil
+		local function run()
+			if cleanupFn then
+				cleanupFn()
+				cleanupFn = nil
+			end
+			local prevScope = currentScope
+			local scopeCleanups: { () -> () } = {}
+			currentScope = scopeCleanups
+			local prevListener = activeListener
+			activeListener = run
+			fn()
+			activeListener = prevListener
+			currentScope = prevScope
+			cleanupFn = function()
+				for _, c in ipairs(scopeCleanups) do
+					c()
+				end
+			end
+		end
+		run()
+		return function()
+			if cleanupFn then
+				cleanupFn()
+			end
+		end
+	end
+
+	local function cleanup(fn: () -> ())
+		if currentScope then
+			table.insert(currentScope, fn)
+		end
+	end
+
+	local ACTION_KEY = newproxy(true)
+	local function action()
+		return function(cb: any, priority: number?)
+			return { [ACTION_KEY] = true, callback = cb, priority = priority or 0 }
+		end, function(v: any)
+			return type(v) == "table" and v[ACTION_KEY] == true
+		end
+	end
+
+	local function derive(fn: () -> any): any
+		return fn
+	end
+
+	local function untrack(fn: () -> any): any
+		local prev = activeListener
+		activeListener = nil
+		local res = fn()
+		activeListener = prev
+		return res
+	end
+
+	local function batch(fn: () -> ()): () -> ()
+		return fn()
+	end
+
+	return {
+		source = source,
+		root = root,
+		effect = effect,
+		cleanup = cleanup,
+		action = action,
+		derive = derive,
+		untrack = untrack,
+		batch = batch,
+	}
+end
 
 local Headless = {}
 
@@ -418,7 +536,7 @@ InstanceMT.methods = {
 --- Build the host. A fresh instance-space per call, so two suites in one process
 --- cannot reach each other through it.
 function Headless.new(): any
-	local core = VideCore.load()
+	local core = if VideCore then VideCore.load() else nil
 	if not core then
 		error(
 			"Aether.Host.LuauDataModel: no installed vide reachable. Run `pesde install` in "
@@ -769,7 +887,7 @@ function Headless.new(): any
 	---
 	--- vide's spring module is pure arithmetic over `graph`; only its FRAME
 	--- SOURCE was ever Roblox-bound. `Clock.Step` drives it below.
-	local core = VideCore.load()
+	local core = if VideCore then VideCore.load() else nil
 	if core and core.spring then
 		host.spring = core.spring
 	else
