@@ -112,12 +112,11 @@ local function buildFallbackCore()
 	end
 
 	local function effect(fn: () -> ()): () -> ()
+		local alive = true
 		local cleanupFn: (() -> ())? = nil
 		local function run()
-			if cleanupFn then
-				cleanupFn()
-				cleanupFn = nil
-			end
+			if not alive then return end
+			if cleanupFn then cleanupFn(); cleanupFn = nil end
 			local prevScope = currentScope
 			local scopeCleanups: { () -> () } = {}
 			currentScope = scopeCleanups
@@ -126,20 +125,16 @@ local function buildFallbackCore()
 			fn()
 			activeListener = prevListener
 			currentScope = prevScope
-			cleanupFn = function()
-				for _, c in ipairs(scopeCleanups) do
-					c()
-				end
-			end
+			cleanupFn = function() for _, c in ipairs(scopeCleanups) do c() end end
 		end
 		run()
-		return function()
-			if cleanupFn then
-				cleanupFn()
-			end
+		local function dispose()
+			alive = false
+			if cleanupFn then cleanupFn(); cleanupFn = nil end
 		end
+		if currentScope then table.insert(currentScope, dispose) end
+		return dispose
 	end
-
 	local function cleanup(fn: () -> ())
 		if currentScope then
 			table.insert(currentScope, fn)
@@ -848,13 +843,15 @@ function Headless.new(): any
 		if not teardown then
 			return
 		end
-		local scope = core.graph.get_scope()
-		if scope then
-			core.graph.push_cleanup(scope, teardown)
+		if core.graph and core.graph.get_scope then
+			local scope = core.graph.get_scope()
+			if scope then
+				core.graph.push_cleanup(scope, teardown)
+			else
+				table.insert(orphanCleanups, teardown)
+			end
 		else
-			--- No scope to own it. Held, never called: running it here would be
-			--- the bug described above.
-			table.insert(orphanCleanups, teardown)
+			core.cleanup(teardown)
 		end
 	end
 
