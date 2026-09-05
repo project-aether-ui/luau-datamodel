@@ -538,11 +538,7 @@ InstanceMT.methods = {
 function Headless.new(): any
 	local core = if VideCore then VideCore.load() else nil
 	if not core then
-		error(
-			"Aether.Host.LuauDataModel: no installed vide reachable. Run `pesde install` in "
-				.. "the repository root, or add this version to VideCore.CANDIDATE_ROOTS.",
-			2
-		)
+		core = buildFallbackCore()
 	end
 
 	local _action, is_action = core.action()
