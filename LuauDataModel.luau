@@ -953,7 +953,7 @@ function Headless.new(): any
 	--- TEXT METRICS (ms-52 M1). The bundled advance table by default; the web host
 	--- registers a browser-backed cache over the top of it, which is what makes
 	--- accuracy converge without layout ever awaiting.
-	host.Text = require("../aether/src/host/Text")
+	host.Text = require("./Text")
 
 	host.Instance = { new = newInstance }
 
@@ -1034,7 +1034,7 @@ function Headless.new(): any
 	--- and on zune it is a hard error at require time.
 	local ok, lune = pcall(require, "@lune/roblox")
 	if not ok or lune == nil then
-		lune = require("../aether/src/host/PureVocabulary").build()
+		lune = require("./PureVocabulary").build()
 	end
 
 	host.Vocabulary = {
